@@ -1,0 +1,11 @@
+{
+  "input": {
+    "prompt": "A serene Japanese garden with cherry blossoms falling gently onto a koi pond, golden hour lighting, photorealistic",
+    "width": 1024,
+    "height": 1024,
+    "num_inference_steps": 9,
+    "seed": 42,
+    "max_sequence_length": 512,
+    "num_images": 1
+  }
+}

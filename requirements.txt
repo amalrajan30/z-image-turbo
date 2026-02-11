@@ -1,0 +1,7 @@
+torch>=2.1.0
+git+https://github.com/huggingface/diffusers
+transformers
+accelerate
+safetensors
+sentencepiece
+runpod
