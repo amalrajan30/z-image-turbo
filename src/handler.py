@@ -17,65 +17,63 @@ from diffusers import ZImagePipeline
 # ---------------------------------------------------------------------------
 # Model loading — runs ONCE at worker startup (not per-request)
 #
-# Supports two model sources (checked in order):
-#   1. RunPod model cache  — /runpod-volume/huggingface-cache/hub/
-#   2. HuggingFace Hub     — downloads from huggingface.co (fallback)
+# Load order:
+#   1. RunPod model cache at /runpod-volume/huggingface-cache/hub/
+#      (pre-downloaded by RunPod when "Model" is set on the endpoint)
+#   2. HuggingFace Hub fallback (downloads ~33GB on first cold start)
+#
+# The Dockerfile sets HF_HOME / HF_HUB_CACHE / TRANSFORMERS_CACHE to point
+# at the RunPod cache volume, so `from_pretrained(MODEL_ID)` will find the
+# cached files automatically without needing an explicit local path.
 # ---------------------------------------------------------------------------
 
 MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
-RUNPOD_CACHE_DIR = "/runpod-volume/huggingface-cache/hub"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+print(f"[init] Device: {DEVICE}")
+print(f"[init] HF_HOME={os.environ.get('HF_HOME', 'not set')}")
+print(f"[init] HF_HUB_CACHE={os.environ.get('HF_HUB_CACHE', 'not set')}")
 
-def _resolve_model_path():
-    """Return the local cached path if available, else the HF Hub model ID."""
-    cache_name = MODEL_ID.replace("/", "--")
-    snapshots_dir = os.path.join(RUNPOD_CACHE_DIR, f"models--{cache_name}", "snapshots")
-    if os.path.exists(snapshots_dir):
-        snapshots = os.listdir(snapshots_dir)
-        if snapshots:
-            path = os.path.join(snapshots_dir, snapshots[0])
-            print(f"Using RunPod cached model at: {path}")
-            return path
-    print(f"RunPod cache not found, loading from HuggingFace Hub: {MODEL_ID}")
-    return MODEL_ID
+# Log whether RunPod cache volume is mounted
+cache_dir = os.environ.get("HF_HUB_CACHE", "/runpod-volume/huggingface-cache/hub")
+if os.path.isdir(cache_dir):
+    print(f"[init] Cache directory exists: {cache_dir}")
+    try:
+        contents = os.listdir(cache_dir)
+        model_dirs = [d for d in contents if "Z-Image-Turbo" in d]
+        print(f"[init] Matching model dirs in cache: {model_dirs or 'none'}")
+    except Exception as e:
+        print(f"[init] Could not list cache dir: {e}")
+else:
+    print(f"[init] Cache directory NOT found: {cache_dir}")
+    print("[init] Will download from HuggingFace Hub (this may take a while)")
 
-
-print("Loading Z-Image-Turbo pipeline …")
+print(f"[init] Loading {MODEL_ID} …")
 _start = time.time()
 
 pipe = ZImagePipeline.from_pretrained(
-    _resolve_model_path(),
+    MODEL_ID,
     torch_dtype=torch.bfloat16,
-    low_cpu_mem_usage=False,
+    low_cpu_mem_usage=True,
 )
+
+print(f"[init] Pipeline loaded to CPU in {time.time() - _start:.1f}s, moving to {DEVICE} …")
+_t_gpu = time.time()
 pipe.to(DEVICE)
+print(f"[init] Moved to {DEVICE} in {time.time() - _t_gpu:.1f}s")
 
 # Enable Flash Attention if available for faster inference
 try:
     pipe.transformer.set_attention_backend("flash")
-    print("Flash Attention enabled")
+    print("[init] Flash Attention enabled")
 except Exception:
-    print("Flash Attention not available, using default attention")
+    print("[init] Flash Attention not available, using default attention")
 
-print(f"Model loaded in {time.time() - _start:.1f}s")
+print(f"[init] Ready. Total model load time: {time.time() - _start:.1f}s")
 
 # ---------------------------------------------------------------------------
-# Supported resolutions (width x height)
+# Constants
 # ---------------------------------------------------------------------------
-
-SUPPORTED_RESOLUTIONS = {
-    (512, 512),
-    (768, 768),
-    (1024, 1024),
-    (1024, 768),
-    (768, 1024),
-    (1280, 720),
-    (720, 1280),
-    (1536, 1024),
-    (1024, 1536),
-    (2048, 2048),
-}
 
 MAX_DIMENSION = 2048
 MIN_DIMENSION = 512

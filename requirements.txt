@@ -4,4 +4,6 @@ transformers
 accelerate
 safetensors
 sentencepiece
+huggingface_hub
+hf_transfer
 runpod
