@@ -17,42 +17,57 @@ from diffusers import ZImagePipeline
 # ---------------------------------------------------------------------------
 # Model loading — runs ONCE at worker startup (not per-request)
 #
-# Load order:
-#   1. RunPod model cache at /runpod-volume/huggingface-cache/hub/
-#      (pre-downloaded by RunPod when "Model" is set on the endpoint)
-#   2. HuggingFace Hub fallback (downloads ~33GB on first cold start)
+# Uses RunPod's cached models feature (docs: /serverless/endpoints/model-caching).
+# When "Model" is set to "Tongyi-MAI/Z-Image-Turbo" on the endpoint, RunPod
+# pre-downloads the weights to /runpod-volume/huggingface-cache/hub/ on the
+# host machine.
 #
-# The Dockerfile sets HF_HOME / HF_HUB_CACHE / TRANSFORMERS_CACHE to point
-# at the RunPod cache volume, so `from_pretrained(MODEL_ID)` will find the
-# cached files automatically without needing an explicit local path.
+# Per the docs, custom workers must manually locate the cached snapshot path
+# and pass it directly to from_pretrained(). We do NOT rely on HF_HOME env
+# vars because the RunPod cache may lack the refs/ metadata that HuggingFace
+# needs for automatic env-var-based discovery.
 # ---------------------------------------------------------------------------
 
 MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
+CACHE_DIR = "/runpod-volume/huggingface-cache/hub"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
+def find_model_path(model_name):
+    """
+    Locate a cached model on the RunPod volume.
+
+    Follows the pattern from RunPod docs:
+    /runpod-volume/huggingface-cache/hub/models--Org--Model/snapshots/<hash>/
+
+    Returns the full snapshot path if found, otherwise None.
+    """
+    cache_name = model_name.replace("/", "--")
+    snapshots_dir = os.path.join(CACHE_DIR, f"models--{cache_name}", "snapshots")
+    if os.path.exists(snapshots_dir):
+        snapshots = os.listdir(snapshots_dir)
+        if snapshots:
+            return os.path.join(snapshots_dir, snapshots[0])
+    return None
+
+
 print(f"[init] Device: {DEVICE}")
-print(f"[init] HF_HOME={os.environ.get('HF_HOME', 'not set')}")
-print(f"[init] HF_HUB_CACHE={os.environ.get('HF_HUB_CACHE', 'not set')}")
+print(f"[init] Looking for cached model in: {CACHE_DIR}")
 
-# Log whether RunPod cache volume is mounted
-cache_dir = os.environ.get("HF_HUB_CACHE", "/runpod-volume/huggingface-cache/hub")
-if os.path.isdir(cache_dir):
-    print(f"[init] Cache directory exists: {cache_dir}")
-    try:
-        contents = os.listdir(cache_dir)
-        model_dirs = [d for d in contents if "Z-Image-Turbo" in d]
-        print(f"[init] Matching model dirs in cache: {model_dirs or 'none'}")
-    except Exception as e:
-        print(f"[init] Could not list cache dir: {e}")
+cached_path = find_model_path(MODEL_ID)
+if cached_path:
+    print(f"[init] Found cached model at: {cached_path}")
+    model_source = cached_path
 else:
-    print(f"[init] Cache directory NOT found: {cache_dir}")
-    print("[init] Will download from HuggingFace Hub (this may take a while)")
+    print(f"[init] Cache miss — will download from HuggingFace Hub: {MODEL_ID}")
+    print("[init] (Set 'Model' to 'Tongyi-MAI/Z-Image-Turbo' in endpoint settings to enable caching)")
+    model_source = MODEL_ID
 
-print(f"[init] Loading {MODEL_ID} …")
+print(f"[init] Loading pipeline from: {model_source}")
 _start = time.time()
 
 pipe = ZImagePipeline.from_pretrained(
-    MODEL_ID,
+    model_source,
     torch_dtype=torch.bfloat16,
     low_cpu_mem_usage=True,
 )

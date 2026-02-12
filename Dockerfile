@@ -16,14 +16,8 @@ FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    # --- RunPod: extend init timeout to 10 min for large model loading ---
-    RUNPOD_INIT_TIMEOUT=600 \
-    # --- HuggingFace: point cache at RunPod's pre-cached volume ---
-    HF_HOME=/runpod-volume/huggingface-cache \
-    HF_HUB_CACHE=/runpod-volume/huggingface-cache/hub \
-    TRANSFORMERS_CACHE=/runpod-volume/huggingface-cache/hub \
-    # --- HuggingFace: enable fast Rust-based transfer if available ---
-    HF_HUB_ENABLE_HF_TRANSFER=1
+    # RunPod: extend init timeout to 10 min for large model loading
+    RUNPOD_INIT_TIMEOUT=600
 
 # --- System packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
